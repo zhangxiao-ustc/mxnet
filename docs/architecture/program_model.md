@@ -13,7 +13,7 @@ In this document, we focus on two of the most important high-level design decisi
 
 Throughout, we'll focus on the programming models themselves.
 When programming style decisions may impact performance, we point this out,
-but we don't dwell on specific implementation details..  
+but we don't dwell on specific implementation details. 
 
 
 ## Symbolic vs. Imperative Programs
@@ -92,7 +92,7 @@ are powerful DSLs that generate callable computation graphs for neural networks.
 <!-- In that sense, config-file input libraries are all symbolic. -->
 
 Intuitively, you might say that imperative programs
-are more *native* than  symbolic programs.
+are more *native* than symbolic programs.
 It's easier to use native language features.
 For example, it's straightforward to print out the values
 in the middle of computation or to use native control flow and loops
@@ -143,7 +143,7 @@ We benefit because the symbolic programs
 can then safely reuse the memory for in-place computation.
 But on the other hand, if we later decide that we need to access `c`, we're out of luck.
 So imperative programs are better prepared to encounter all possible demands.
-If we ran the imperativ version of the code in a Python console,
+If we ran the imperative version of the code in a Python console,
 we could inspect any of the intermediate variables in the future.
 
 <!-- Of course, this is somewhat misleading, because garbage collection can occur in imperative programs and memory could then be reused.
@@ -155,7 +155,7 @@ Returning to our toy example, the multiplication and addition operations
 can be folded into one operation, as shown in the following graph.
 If the computation runs on a GPU processor,
 one GPU kernel will be executed, instead of two.
-In fact, this is one war that we hand-craft operations
+In fact, this is one way we hand-craft operations
 in optimized libraries, such as CXXNet and Caffe.
 Operation folding improves computation efficiency.
 
@@ -165,7 +165,7 @@ Note, you can't perform operation folding in imperative programs,
 because the intermediate values might be referenced in the future.
 Operation folding is possible in symbolic programs
 because you get the entire computation graph,
-and a clear specification of which values will be needed and which not.
+and a clear specification of which values will be needed and which are not.
 
 
 ### Case Study: Backprop and AutoDiff
@@ -173,7 +173,7 @@ and a clear specification of which values will be needed and which not.
 In this section, we compare the two programming models
 on the problem of auto differentiation, or backpropagation.
 Differentiation is of vital importance in deep learning
-because it's the mechanism by which we train out models.
+because it's the mechanism by which we train our models.
 In any deep learning model, we define a _loss function_.
 A _loss function_ measures how far the model is from the desired output.
 We then typically pass over training examples (pairs of inputs and ground-truth outputs).
@@ -185,7 +185,7 @@ In the past, whenever someone defined a new model,
 they had to work out the derivative calculations by hand.
 While the math is reasonably straightforward,
 for complex models, it can be time-consuming and tedious work.
-All modern deep learning libraries make the practictioner/researcher's job
+All modern deep learning libraries make the practitioner/researcher's job
 much easier, by automatically solving the problem of gradient calculation.
 
 Both imperative and symbolic programs can perform gradient calculation.
@@ -251,7 +251,7 @@ The following program performs symbolic gradient calculation for the same task.
     grad_a, grad_b = f(A=np.ones(10), B=np.ones(10)*2)
 ```
 
-The grad function of D generates a backward computation graph,
+The grad function of ```D``` generates a backward computation graph,
 and returns a gradient node, ```gA, gB```,
 which correspond to the red nodes in the following figure.
 
@@ -269,7 +269,7 @@ Recall the *be prepared to encounter all possible demands* requirement of impera
 If you are creating an array library that supports automatic differentiation,
 you have to keep the grad closure along with the computation.
 This means that none of the history variables can be
-garbage-collected because they are referenced by variable `d`  by way of function closure.
+garbage-collected because they are referenced by variable `d` by way of function closure.
 
 What if you want to compute only the value of `d`,
 and don't want the gradient value?
@@ -293,19 +293,18 @@ which requires ```n``` copies of temporal space.
 As you can see, the level of optimization depends
 on the restrictions on what you can do.
 Symbolic programs ask you to clearly specify
-these these restrictions when you compile the graph.
+these restrictions when you compile the graph.
 One the other hand, imperative programs
 must be prepared for a wider range of demands.
 Symbolic programs have a natural advantage
 because they know more about what you do and don't want.
 
-There are ways that we can modify imperative programs
+There are ways in which we can modify imperative programs
 to incorporate similar restrictions.
 For example, one solution to the preceding
 problem is to introduce a context variable.
 You can introduce a no-gradient context variable
 to turn gradient calculation off.
-<!-- This provides an imperative program with the ability to impose some restrictions, but reduces efficiency. -->
 
 ```python
     with context.NoGradient():
@@ -314,6 +313,8 @@ to turn gradient calculation off.
         c = b * a
         d = c + 1
 ```
+
+<!-- This provides an imperative program with the ability to impose some restrictions, but reduces efficiency. -->
 
 However, this example still must be prepared to encounter all possible demands,
 which means that you can't perform the in-place calculation
@@ -374,13 +375,13 @@ But it's not obvious how to use graphs to describe parameter updates.
 That's because parameter updates introduce mutation,
 which is not a data flow concept.
 Most symbolic programs introduce a special update statement
-to update some persistent states of the programs.
+to update persistent state in the programs.
 
 It's usually easier to write parameter updates in an imperative style,
 especially when you need multiple updates that relate to each other.
 For symbolic programs, the update statement is also executed as you call it.
 So in that sense, most symbolic deep learning libraries
-fall back on the imperative approach to perform  updates,
+fall back on the imperative approach to perform updates,
 while using the symbolic approach to perform gradient calculation.
 
 ### There Is No Strict Boundary
@@ -388,7 +389,7 @@ while using the symbolic approach to perform gradient calculation.
 In comparing the two programming styles,
 some of our arguments might not be strictly true,
 i.e., it's possible to make an imperative program
-more like a traditional symbolic program or vice versa.  
+more like a traditional symbolic program or vice versa. 
 However, the two archetypes are useful abstractions,
 especially for understanding the differences between deep learning libraries.
 We might reasonably conclude that there is no clear boundary between programming styles.
@@ -400,11 +401,11 @@ information held in symbolic programs.
 
 ## Big vs. Small Operations
 
-When designing a deep learning library, another important programming model decision  
+When designing a deep learning library, another important programming model decision 
 is precisely what operations to support.
 In general, there are two families of operations supported by most deep learning libraries:
 
-- Big operations -typically for computing neural network layers (e.g. FullyConnected and BatchNormalize).
+- Big operations - typically for computing neural network layers (e.g. FullyConnected and BatchNormalize).
 - Small operations - mathematical functions like matrix multiplication and element-wise addition.
 
 Libraries like CXXNet and Caffe support layer-level operations.
@@ -412,13 +413,13 @@ Libraries like Theano and Minerva support fine-grained operations.
 
 ### Smaller Operations Can Be More Flexible
 It's quite natural to use smaller operations to compose bigger operations.
-For example, the sigmoid unit can be simply be composed of division, addition and an exponential:
+For example, the sigmoid unit can simply be composed of division, addition and an exponentiation:
 
 ```python
     sigmoid(x) = 1.0 / (1.0 + exp(-x))
 ```
 Using smaller operations as building blocks, you can express nearly anything you want.
-If you're  more familiar with CXXNet- or Caffe-style layers,
+If you're more familiar with CXXNet- or Caffe-style layers,
 note that these operations don't differ from a layer, except that they are smaller.
 
 ```python
@@ -433,7 +434,7 @@ because you only need to compose the components.
 Directly composing sigmoid layers requires three layers of operation, instead of one.
 
 ```python
-    SigmoidLayer(x) = EWiseDivisionLayer(1.0, AddScalarLayer(ExpLayer(-x),   1.0))
+    SigmoidLayer(x) = EWiseDivisionLayer(1.0, AddScalarLayer(ExpLayer(-x), 1.0))
 ```
 This code creates overhead for computation and memory (which could be optimized, with cost).
 
@@ -466,8 +467,8 @@ For computation graphs with smaller operations,
 these optimizations are crucial to performance.
 Because the operations are small,
 there are many sub-graph patterns that can be matched.
-Also, because the final generated operations
-might not be able to be enumerated,
+Also, because the final, generated operations
+might not be enumerable,
 an explicit recompilation of the kernels is required,
 as opposed to the fixed amount of precompiled kernels
 in the big operation libraries.
@@ -476,7 +477,7 @@ that support small operations.
 Requiring compilation optimization also creates engineering overhead
 for the libraries that solely support smaller operations.
 
-As in the case of symbolic vs imperative,
+As in the case of symbolic vs. imperative,
 the bigger operation libraries "cheat"
 by asking you to provide restrictions (to the common layer),
 so that you actually perform the sub-graph matching.
@@ -508,9 +509,9 @@ operations by composing smaller operations. It's an option worth considering.
 
 ## Mix the Approaches
 
-Now that we've compared the programming models, which should you choose?
+Now that we've compared the programming models, which one should you choose?
 Before delving into that, we should emphasize that depending on the problems you're trying to solve,
-our comparison mighty not necessarily have a big impact.
+our comparison might not necessarily have a big impact.
 
 Remember [Amdahl's law](https://en.wikipedia.org/wiki/Amdahl%27s_law):
 If you are optimizing a non-performance-critical part of your problem,
@@ -522,7 +523,7 @@ The more suitable programming style depends on the problem you are trying to sol
 For example, imperative programs are better for parameter updates,
 and symbolic programs for gradient calculation.
 
-We advocate *mixing* the approaches.  
+We advocate *mixing* the approaches. 
 Sometimes the part that we want to be flexible
 isn't crucial to performance.
 In these cases, it's okay to leave some efficiency on the table
@@ -562,7 +563,7 @@ This is exactly like writing C++ programs and exposing them to Python, which we 
 Because parameter memory resides on the GPU,
 you might not want to use NumPy as an imperative component.
 Supporting a GPU-compatible imperative library
-that interacts with symbolic compiled functions  
+that interacts with symbolic compiled functions 
 or provides a limited amount of updating syntax
 in the update statement in symbolic program execution
 might be a better choice.
@@ -576,7 +577,7 @@ Usually, you can use big operations to compose existing
 components, and use smaller operations to build the new parts.
 
 Recall Amdahl's law. Often, the new components
-are not be the cause of the computation bottleneck.
+are not the cause of the computation bottleneck.
 Because the performance-critical part is already optimized by
 the bigger operations, it's okay to forego optimizing the additional small operations,
 or to do a limited amount of memory optimization instead

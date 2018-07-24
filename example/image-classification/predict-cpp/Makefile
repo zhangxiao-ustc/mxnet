@@ -12,7 +12,7 @@ CFLAGS+= `pkg-config --cflags opencv`
 LDFLAGS+=`pkg-config --libs opencv`
 
 # Added for mxnet
-export MXNET_ROOT=`pwd`/../../../../mxnet
+export MXNET_ROOT=`pwd`/../../..
 
 CFLAGS+=-Wall -I$(MXNET_ROOT)/include
 LDFLAGS+=$(MXNET_ROOT)/lib/libmxnet.so
@@ -28,4 +28,4 @@ clean:
 	rm -f *.d *.o
 
 lint:
-	python ../../../dmlc-core/scripts/lint.py mxnet "cpp" ./
+	python ../../../3rdparty/dmlc-core/scripts/lint.py mxnet "cpp" ./

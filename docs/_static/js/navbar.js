@@ -1,9 +1,16 @@
 var searchBox = $("#search-input-wrap");
-var TITLE = ['/get_started/', '/tutorials/', '/how_to/', '/api/', '/architecture/'];
-var APIsubMenu;
+var TITLE = ['/install/', '/gluon/', '/api/', '/docs/', '/community/' ];
+var DOC_TITLE = ['/faq/', '/tutorials/', '/architecture/', '/model_zoo/'];
+var APISubmenu, versionSubmenu, docSubmenu, communitySubmenu;
 $("#burgerMenu").children().each(function () {
-    if($(this).children().first().html() == 'API') APIsubMenu = $(this).clone()
+    if($(this).children().first().html() == 'API') APISubmenu = $(this).clone();
+    if($(this).children().first().html().indexOf('Versions') == 0) versionSubmenu = $(this).clone();
+    if($(this).children().first().html().indexOf('Community') == 0) communitySubmenu = $(this).clone();
+    if($(this).children().first().html() == 'Docs') docSubmenu= $(this).clone();
 });
+
+$('.burger-link').on('click', function(e) { e.stopPropagation() });
+$('.burger-link').on('touchstart', function(e) { e.stopPropagation() });
 
 function navbar() {
     var leftOffset = 40;
@@ -38,8 +45,17 @@ function navbar() {
     }
     $("#plusMenu").empty();
     for (var i = 0; i < plusMenuList.length; ++i) {
-        if(plusMenuList[i].html().length > 20) {
-            $("#plusMenu").append(APIsubMenu);
+        if(plusMenuList[i].attr('id') == 'dropdown-menu-position-anchor') {
+            $("#plusMenu").append(APISubmenu);
+        }
+        else if(plusMenuList[i].attr('id') == 'dropdown-menu-position-anchor-version') {
+            $("#plusMenu").append(versionSubmenu);
+        }
+        else if(plusMenuList[i].attr('id') == 'dropdown-menu-position-anchor-docs') {
+            $("#plusMenu").append(docSubmenu);
+        }
+        else if(plusMenuList[i].attr('id') == 'dropdown-menu-position-anchor-community') {
+            $("#plusMenu").append(communitySubmenu);
         }
         else {
             $("#plusMenu").append("<li></li>");
@@ -52,13 +68,22 @@ function navbar() {
 /*Show bottom border of current tab*/
 function showTab() {
     var url = window.location.href;
+    if(url.indexOf('/get_started/why_mxnet') != -1) return;
     for(var i = 0; i < TITLE.length; ++i) {
         if(url.indexOf(TITLE[i]) != -1) {
             var tab = $($('#main-nav').children().eq(i));
             if(!tab.is('a')) tab = tab.find('a').first();
             tab.css('border-bottom', '3px solid');
+            return;
         }
     }
+     for(var i = 0; i < DOC_TITLE.length; ++i) {
+        if(url.indexOf(DOC_TITLE[i]) != -1) {
+            var tab = $($('#main-nav').children().eq(3));
+            if(!tab.is('a')) tab = tab.find('a').first();
+            tab.css('border-bottom', '3px solid');
+        }
+     }
 }
 
 $(document).ready(function () {
@@ -66,5 +91,7 @@ $(document).ready(function () {
     showTab();
     $(window).resize(function () {
         navbar();
+        if($("body").prop("clientWidth") < 1000 || $('div.sphinxsidebar').css('visibility') == 'hidden') $('div.content').css('width', '100%');
+        else $('div.content').css('width', 'calc(100% - 300px)');
     });
 });

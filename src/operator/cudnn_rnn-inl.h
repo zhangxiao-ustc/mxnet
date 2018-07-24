@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  * Copyright (c) 2016 by Contributors
  * \file cudnn_rnn-inl.h
@@ -19,12 +38,18 @@ namespace mxnet {
 namespace op {
 #if defined(__CUDACC__) && MXNET_USE_CUDNN == 1 && CUDNN_MAJOR >= 5
 template<typename DType>
-class CuDNNRNNOp : public Operator {
+class CuDNNRNNOp : public Operator{
  public:
   explicit CuDNNRNNOp(RNNParam param) {
     this->param_ = param;
     init_cudnn_ = false;
     dtype_ = mshadow::DataType<DType>::kCudnnFlag;
+    // TensorCore algos only allowed on fp16-I/O convolutions if permitted by the global policy.
+    // No tests in place for fp16 RNNs, so leave TensorCore disabled for now.
+    cudnn_tensor_core_ = false;
+    // When fp16 RNN tests are introduced, we can enable TensorCore as follows:
+//    cudnn_tensor_core =
+//        mshadow::DataType<DType>::kFlag == mshadow::kFloat16 && GetEnvAllowTensorCore();
     // Defaults
     input_mode_ = CUDNN_LINEAR_INPUT;  // Don't support this yet
     // RNN Mode
@@ -51,9 +76,39 @@ class CuDNNRNNOp : public Operator {
       param_.lstm_q_ = true;
     else
       param_.lstm_q_ = false;
+
+    // Create descriptors
+    CUDNN_CALL(cudnnCreateTensorDescriptor(&hx_desc_));
+    CUDNN_CALL(cudnnCreateTensorDescriptor(&cx_desc_));
+    CUDNN_CALL(cudnnCreateTensorDescriptor(&hy_desc_));
+    CUDNN_CALL(cudnnCreateTensorDescriptor(&cy_desc_));
+    CUDNN_CALL(cudnnCreateTensorDescriptor(&dhx_desc_));
+    CUDNN_CALL(cudnnCreateTensorDescriptor(&dcx_desc_));
+    CUDNN_CALL(cudnnCreateTensorDescriptor(&dhy_desc_));
+    CUDNN_CALL(cudnnCreateTensorDescriptor(&dcy_desc_));
+
+    CUDNN_CALL(cudnnCreateFilterDescriptor(&w_desc_));
+    CUDNN_CALL(cudnnCreateFilterDescriptor(&dw_desc_));
+
+    CUDNN_CALL(cudnnCreateRNNDescriptor(&rnn_desc_));
+    CUDNN_CALL(cudnnCreateDropoutDescriptor(&dropout_desc_));
   }
 
   ~CuDNNRNNOp() {
+    CUDNN_CALL(cudnnDestroyTensorDescriptor(hx_desc_));
+    CUDNN_CALL(cudnnDestroyTensorDescriptor(cx_desc_));
+    CUDNN_CALL(cudnnDestroyTensorDescriptor(hy_desc_));
+    CUDNN_CALL(cudnnDestroyTensorDescriptor(cy_desc_));
+    CUDNN_CALL(cudnnDestroyTensorDescriptor(dhx_desc_));
+    CUDNN_CALL(cudnnDestroyTensorDescriptor(dcx_desc_));
+    CUDNN_CALL(cudnnDestroyTensorDescriptor(dhy_desc_));
+    CUDNN_CALL(cudnnDestroyTensorDescriptor(dcy_desc_));
+
+    CUDNN_CALL(cudnnDestroyFilterDescriptor(w_desc_));
+    CUDNN_CALL(cudnnDestroyFilterDescriptor(dw_desc_));
+    CUDNN_CALL(cudnnDestroyRNNDescriptor(rnn_desc_));
+    CUDNN_CALL(cudnnDestroyDropoutDescriptor(dropout_desc_));
+
     if (init_cudnn_) {
       for (size_t i = 0; i < x_desc_vec_.size(); ++i) {
         CUDNN_CALL(cudnnDestroyTensorDescriptor(x_desc_vec_[i]));
@@ -61,25 +116,16 @@ class CuDNNRNNOp : public Operator {
         CUDNN_CALL(cudnnDestroyTensorDescriptor(dx_desc_vec_[i]));
         CUDNN_CALL(cudnnDestroyTensorDescriptor(dy_desc_vec_[i]));
       }
-      CUDNN_CALL(cudnnDestroyTensorDescriptor(hx_desc_));
-      CUDNN_CALL(cudnnDestroyTensorDescriptor(cx_desc_));
-      CUDNN_CALL(cudnnDestroyTensorDescriptor(hy_desc_));
-      CUDNN_CALL(cudnnDestroyTensorDescriptor(cy_desc_));
-      CUDNN_CALL(cudnnDestroyTensorDescriptor(dhx_desc_));
-      CUDNN_CALL(cudnnDestroyTensorDescriptor(dcx_desc_));
-      CUDNN_CALL(cudnnDestroyTensorDescriptor(dhy_desc_));
-      CUDNN_CALL(cudnnDestroyTensorDescriptor(dcy_desc_));
+      init_cudnn_ = false;
 
-      CUDNN_CALL(cudnnDestroyFilterDescriptor(w_desc_));
-      CUDNN_CALL(cudnnDestroyRNNDescriptor(rnn_desc_));
-      CUDNN_CALL(cudnnDestroyDropoutDescriptor(dropout_desc_));
-      Storage::Get()->Free(dropout_states_);
       Storage::Get()->Free(reserve_space_);
+      if (param_.p > 0) {
+        Storage::Get()->Free(dropout_states_);
+      }
     }
   }
 
-  virtual void Forward(const OpContext &ctx,
-                       const std::vector<TBlob> &in_data,
+  virtual void Forward(const OpContext &ctx, const std::vector<TBlob> &in_data,
                        const std::vector<OpReqType> &req,
                        const std::vector<TBlob> &out_data,
                        const std::vector<TBlob> &aux_args) {
@@ -368,15 +414,6 @@ class CuDNNRNNOp : public Operator {
       strideA[1] = dimA[2];
       strideA[2] = 1;
 
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&hx_desc_));
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&cx_desc_));
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&hy_desc_));
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&cy_desc_));
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&dhx_desc_));
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&dcx_desc_));
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&dhy_desc_));
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&dcy_desc_));
-
       CUDNN_CALL(cudnnSetTensorNdDescriptor(hx_desc_,
                                             dtype_,
                                             3,
@@ -419,27 +456,48 @@ class CuDNNRNNOp : public Operator {
                                             strideA));
 
       // Create Dropout descriptors
-      CUDNN_CALL(cudnnCreateDropoutDescriptor(&dropout_desc_));
-      CUDNN_CALL(cudnnDropoutGetStatesSize(s->dnn_handle_,
-                                           &dropout_byte_));
-      dropout_size_ = dropout_byte_ / sizeof(DType);
-      dropout_states_ = Storage::Get()->Alloc(dropout_byte_, Context::GPU());
-      CUDNN_CALL(cudnnSetDropoutDescriptor(dropout_desc_,
-                                           s->dnn_handle_,
-                                           param_.p,  // keep probability
-                                           dropout_states_.dptr,
-                                           dropout_byte_,
+      if (param_.p > 0) {
+        CUDNN_CALL(cudnnDropoutGetStatesSize(s->dnn_handle_, &dropout_byte_));
+        dropout_size_ = dropout_byte_ / sizeof(DType);
+        dropout_states_ = Storage::Get()->Alloc(dropout_byte_, Context::GPU());
+      } else {
+        dropout_states_ = {};
+        dropout_byte_ = 0;
+      }
+      CUDNN_CALL(cudnnSetDropoutDescriptor(dropout_desc_, s->dnn_handle_,
+                                           param_.p,  // discard probability
+                                           dropout_states_.dptr, dropout_byte_,
                                            seed_));
       // RNN descriptors
-      CUDNN_CALL(cudnnCreateRNNDescriptor(&rnn_desc_));
-      CUDNN_CALL(cudnnSetRNNDescriptor(rnn_desc_,
-                                       param_.state_size,
-                                       param_.num_layers,
-                                       dropout_desc_,
-                                       input_mode_,
-                                       direction_,
-                                       mode_,
-                                       dtype_));
+      #if CUDNN_MAJOR >= 6
+        cudnnRNNAlgo_t rnn_algo = CUDNN_RNN_ALGO_STANDARD;
+        CUDNN_CALL(cudnnSetRNNDescriptor_v6(s->dnn_handle_,
+                                            rnn_desc_,
+                                            param_.state_size,
+                                            param_.num_layers,
+                                            dropout_desc_,
+                                            input_mode_,
+                                            direction_,
+                                            mode_,
+                                            rnn_algo,
+                                            dtype_));
+      #else
+        CUDNN_CALL(cudnnSetRNNDescriptor(rnn_desc_,
+                                         param_.state_size,
+                                         param_.num_layers,
+                                         dropout_desc_,
+                                         input_mode_,
+                                         direction_,
+                                         mode_,
+                                         dtype_));
+      #endif
+      #if CUDNN_MAJOR >= 7
+        cudnnMathType_t math_type = CUDNN_DEFAULT_MATH;
+        if (cudnn_tensor_core_ && rnn_algo == CUDNN_RNN_ALGO_STANDARD) {
+          math_type = CUDNN_TENSOR_OP_MATH;
+        }
+        CUDNN_CALL(cudnnSetRNNMatrixMathType(rnn_desc_, math_type));
+      #endif
       // Get temp space sizes
       CUDNN_CALL(cudnnGetRNNWorkspaceSize(s->dnn_handle_,
                                           rnn_desc_,
@@ -465,8 +523,6 @@ class CuDNNRNNOp : public Operator {
       CHECK_EQ(w.shape_[0] * sizeof(DType), cudnn_param_size);
 
       // Set param descriptors
-      CUDNN_CALL(cudnnCreateFilterDescriptor(&w_desc_));
-      CUDNN_CALL(cudnnCreateFilterDescriptor(&dw_desc_));
       int dim_w[3] = {1, 1, 1};
       dim_w[0] = w.shape_[0];
       CUDNN_CALL(cudnnSetFilterNdDescriptor(w_desc_,
@@ -526,7 +582,7 @@ class CuDNNRNNOp : public Operator {
   cudnnRNNInputMode_t input_mode_;
   cudnnDropoutDescriptor_t dropout_desc_;
   Storage::Handle dropout_states_, reserve_space_;
-  uint64_t seed_ = 1337ull;
+  uint64_t seed_ = 17 + rand() % 4096;  // NOLINT(runtime/threadsafe_fn)
   size_t workspace_byte_, reserve_space_byte_, dropout_byte_;
   int workspace_size_, dropout_size_;
   std::vector<cudnnTensorDescriptor_t> x_desc_vec_, y_desc_vec_, dx_desc_vec_, dy_desc_vec_;
@@ -536,6 +592,8 @@ class CuDNNRNNOp : public Operator {
   cudnnTensorDescriptor_t dhy_desc_, dcy_desc_;
 
   cudnnFilterDescriptor_t w_desc_, dw_desc_;
+  // Allow TensorCore algo policy
+  bool cudnn_tensor_core_;
 
   #if CUDNN_MAJOR >= 5
   cudnnTensorFormat_t format_;

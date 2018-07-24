@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  * Copyright (c) 2015 by Contributors
  * \file correlation-inl.h
@@ -45,7 +64,7 @@ struct CorrelationParam : public dmlc::Parameter<CorrelationParam> {
     .describe("operation type is either multiplication or subduction");
   }
 };
-template<typename xpu>
+template<typename xpu, typename DType>
 class CorrelationOp : public Operator {
  public:
   explicit CorrelationOp(CorrelationParam param) {
@@ -60,14 +79,14 @@ class CorrelationOp : public Operator {
     CHECK_EQ(in_data.size(), 2U);
     CHECK_EQ(out_data.size(), 3U);
     Stream<xpu> *s = ctx.get_stream<xpu>();
-    Tensor<xpu, 4> data1 = in_data[Correlation::kData1].get<xpu, 4, real_t>(s);
-    Tensor<xpu, 4> data2 = in_data[Correlation::kData2].get<xpu, 4, real_t>(s);
-    Tensor<xpu, 4> out   = out_data[Correlation::kOut].get<xpu, 4, real_t>(s);
-    Tensor<xpu, 4> tmp1  = out_data[Correlation::kTemp1].get<xpu, 4, real_t>(s);
-    Tensor<xpu, 4> tmp2  = out_data[Correlation::kTemp2].get<xpu, 4, real_t>(s);
-    tmp1 = 0.0f;
-    tmp2 = 0.0f;
-    out = 0.0f;
+    Tensor<xpu, 4, DType> data1 = in_data[Correlation::kData1].get<xpu, 4, DType>(s);
+    Tensor<xpu, 4, DType> data2 = in_data[Correlation::kData2].get<xpu, 4, DType>(s);
+    Tensor<xpu, 4, DType> out   = out_data[Correlation::kOut].get<xpu, 4, DType>(s);
+    Tensor<xpu, 4, DType> tmp1  = out_data[Correlation::kTemp1].get<xpu, 4, DType>(s);
+    Tensor<xpu, 4, DType> tmp2  = out_data[Correlation::kTemp2].get<xpu, 4, DType>(s);
+    tmp1 = DType(0.0f);
+    tmp2 = DType(0.0f);
+    out = DType(0.0f);
     CHECK_EQ(data1.CheckContiguous(), true);
     CHECK_EQ(data2.CheckContiguous(), true);
     CHECK_EQ(out.CheckContiguous(), true);
@@ -105,13 +124,13 @@ class CorrelationOp : public Operator {
                         const std::vector<TBlob> &aux_args) {
     using namespace mshadow;
     Stream<xpu> *s = ctx.get_stream<xpu>();
-    Tensor<xpu, 4> grad_data1 = in_grad[Correlation::kData1].get<xpu, 4, real_t>(s);
-    Tensor<xpu, 4> grad_data2 = in_grad[Correlation::kData2].get<xpu, 4, real_t>(s);
-    Tensor<xpu, 4> out_g = out_grad[Correlation::kOut].get<xpu, 4, real_t>(s);
-    Tensor<xpu, 4> tmp1 = out_data[Correlation::kTemp1].get<xpu, 4, real_t>(s);
-    Tensor<xpu, 4> tmp2 = out_data[Correlation::kTemp2].get<xpu, 4, real_t>(s);
-    if (req[0] != kAddTo) grad_data1 = 0.0f;
-    if (req[1] != kAddTo) grad_data2 = 0.0f;
+    Tensor<xpu, 4, DType> grad_data1 = in_grad[Correlation::kData1].get<xpu, 4, DType>(s);
+    Tensor<xpu, 4, DType> grad_data2 = in_grad[Correlation::kData2].get<xpu, 4, DType>(s);
+    Tensor<xpu, 4, DType> out_g = out_grad[Correlation::kOut].get<xpu, 4, DType>(s);
+    Tensor<xpu, 4, DType> tmp1 = out_data[Correlation::kTemp1].get<xpu, 4, DType>(s);
+    Tensor<xpu, 4, DType> tmp2 = out_data[Correlation::kTemp2].get<xpu, 4, DType>(s);
+    if (req[0] != kAddTo) grad_data1 = DType(0.0f);
+    if (req[1] != kAddTo) grad_data2 = DType(0.0f);
     CHECK_EQ(grad_data1.CheckContiguous(), true);
     CHECK_EQ(grad_data2.CheckContiguous(), true);
     CHECK_EQ(out_g.CheckContiguous(), true);
@@ -144,7 +163,7 @@ class CorrelationOp : public Operator {
 };   //  class CorrelationOp
 //  Decalre Factory function
 template<typename xpu>
-Operator* CreateOp(CorrelationParam param);
+Operator* CreateOp(CorrelationParam param, int dtype);
 #if DMLC_USE_CXX11
 class CorrelationProp : public OperatorProperty {
  public:
@@ -209,6 +228,22 @@ void Init(const std::vector<std::pair<std::string, std::string> >& kwargs) overr
     out_shape->push_back(Shape4(dshape1[0], paddedbottomheight, paddedbottomwidth, dshape1[1]));
     return true;
   }
+  bool InferType(std::vector<int> *in_type,
+                 std::vector<int> *out_type,
+                 std::vector<int> *aux_type) const override {
+    int dtype = (*in_type)[0];
+    type_assign(&dtype, (*in_type)[1]);
+    type_assign(&dtype, (*out_type)[0]);
+    type_assign(&dtype, (*out_type)[1]);
+    type_assign(&dtype, (*out_type)[2]);
+
+    TYPE_ASSIGN_CHECK(*in_type, 0, dtype);
+    TYPE_ASSIGN_CHECK(*in_type, 1, dtype);
+    TYPE_ASSIGN_CHECK(*out_type, 0, dtype);
+    TYPE_ASSIGN_CHECK(*out_type, 1, dtype);
+    TYPE_ASSIGN_CHECK(*out_type, 2, dtype);
+    return dtype != -1;
+  }
   OperatorProperty* Copy() const override {
     CorrelationProp* Correlation_sym = new CorrelationProp();
     Correlation_sym->param_ = this->param_;
@@ -225,7 +260,13 @@ void Init(const std::vector<std::pair<std::string, std::string> >& kwargs) overr
      return {out_grad[Correlation::kOut],
      out_data[Correlation::kTemp1], out_data[Correlation::kTemp2]};
 }
-  Operator* CreateOperator(Context ctx) const override;
+  Operator* CreateOperator(Context ctx) const override {
+    LOG(FATAL) << "Not Implemented.";
+    return NULL;
+  }
+
+  Operator* CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+                             std::vector<int> *in_type) const override;
 
  private:
   CorrelationParam param_;

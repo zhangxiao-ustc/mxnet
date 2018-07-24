@@ -1,8 +1,27 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  * Copyright (c) 2015 by Contributors
  * \file roi_pooling.cc
  * \brief roi pooling operator
- * \author Ross Girshick, Kye-Hyeon Kim, Jian Guo
+ * \author Ross Girshick, Kye-Hyeon Kim, Jian Guo, Xinyu Chen
 */
 #include "./roi_pooling-inl.h"
 #include <mshadow/base.h>
@@ -34,17 +53,25 @@ inline void ROIPoolForward(const Tensor<cpu, 4, Dtype> &out,
   const int pooled_width_ = out.size(3);
 
   const int num_rois = bbox.size(0);
-  const int batch_size = data.size(0);
   const int data_size = data.size(1) * data.size(2) * data.size(3);
+  const int data_size_c = data.size(2) * data.size(3);
+  const int out_size_c = out.size(2) * out.size(3);
+  const int out_size = channels_ * out_size_c;
+  const int max_idx_size_c = max_idx.size(2) * max_idx.size(3);
+  const int max_idx_size = channels_ * max_idx_size_c;
   // For each ROI R = [batch_index x1 y1 x2 y2]: max pool over R
   for (int n = 0; n < num_rois; ++n) {
-    int roi_batch_ind = bottom_rois[0];
-    int roi_start_w = round(bottom_rois[1] * spatial_scale_);
-    int roi_start_h = round(bottom_rois[2] * spatial_scale_);
-    int roi_end_w = round(bottom_rois[3] * spatial_scale_);
-    int roi_end_h = round(bottom_rois[4] * spatial_scale_);
+    // Increment ROI data pointer
+    const Dtype *bottom_rois_n = bottom_rois + n * bbox.size(1);
+    Dtype *top_data_n = top_data + n * out_size;
+    Dtype *argmax_data_n = argmax_data + n * max_idx_size;
+    int roi_batch_ind = bottom_rois_n[0];
+    int roi_start_w = round(bottom_rois_n[1] * spatial_scale_);
+    int roi_start_h = round(bottom_rois_n[2] * spatial_scale_);
+    int roi_end_w = round(bottom_rois_n[3] * spatial_scale_);
+    int roi_end_h = round(bottom_rois_n[4] * spatial_scale_);
     assert(roi_batch_ind >= 0);
-    assert(roi_batch_ind < batch_size);
+    assert(static_cast<index_t>(roi_batch_ind) < data.size(0) /* batch size */);
 
     // force malformed ROIs to be 1 * 1
     int roi_height = max(roi_end_h - roi_start_h + 1, 1);
@@ -56,12 +83,18 @@ inline void ROIPoolForward(const Tensor<cpu, 4, Dtype> &out,
 
     const Dtype* batch_data = bottom_data + data_size * roi_batch_ind;
 
+    #pragma omp parallel for
     for (int c = 0; c < channels_; ++c) {
+      // Increment all data pointers
+      const Dtype* batch_data_c = batch_data + c * data_size_c;
+      Dtype* top_data_c = top_data_n + c * out_size_c;
+      Dtype* argmax_data_c = argmax_data_n + c * max_idx_size_c;
+
       for (int ph = 0; ph < pooled_height_; ++ph) {
         for (int pw = 0; pw < pooled_width_; ++pw) {
           // Compute pooling region for this output unit:
-          //  start (included) = floor(ph * roi_height / pooled_height_)
-          //  end (excluded) = ceil((ph + 1) * roi_height / pooled_height_)
+          // start (included) = floor(ph * roi_height / pooled_height_)
+          // end (excluded) = ceil((ph + 1) * roi_height / pooled_height_)
           int hstart = static_cast<int>(floor(static_cast<Dtype>(ph)
                                               * bin_size_h));
           int wstart = static_cast<int>(floor(static_cast<Dtype>(pw)
@@ -80,30 +113,23 @@ inline void ROIPoolForward(const Tensor<cpu, 4, Dtype> &out,
 
           const int pool_index = ph * pooled_width_ + pw;
           if (is_empty) {
-            top_data[pool_index] = 0;
-            argmax_data[pool_index] = -1;
+            top_data_c[pool_index] = 0;
+            argmax_data_c[pool_index] = -1;
           }
 
           for (int h = hstart; h < hend; ++h) {
             for (int w = wstart; w < wend; ++w) {
               const int index = h * width_ + w;
-              if (batch_data[index] > top_data[pool_index]) {
-                top_data[pool_index] = batch_data[index];
-                argmax_data[pool_index] = index;
+              if (batch_data_c[index] > top_data_c[pool_index]) {
+                top_data_c[pool_index] = batch_data_c[index];
+                argmax_data_c[pool_index] = index;
               }
             }
           }
         }
       }
-      // Increment all data pointers by one channel
-      batch_data += data.size(2) * data.size(3);
-      top_data += out.size(2) * out.size(3);
-      argmax_data += max_idx.size(2) * max_idx.size(3);
     }
-    // Increment ROI data pointer
-    bottom_rois += bbox.size(1);
   }
-
   return;
 }
 
@@ -217,10 +243,6 @@ Operator *CreateOp<cpu>(ROIPoolingParam param, int dtype) {
 
 Operator *ROIPoolingProp::CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
                                            std::vector<int> *in_type) const {
-  std::vector<TShape> out_shape, aux_shape;
-  std::vector<int> out_type, aux_type;
-  CHECK(InferType(in_type, &out_type, &aux_type));
-  CHECK(InferShape(in_shape, &out_shape, &aux_shape));
   DO_BIND_DISPATCH(CreateOp, param_, in_type->at(0));
 }
 
